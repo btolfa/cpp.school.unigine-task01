@@ -1,0 +1,226 @@
+TEST01
+
+int x[16] vs alloca(64) vs malloc(64)
+int x[16] - быстрое; sub esp,64
+alloca(64) - быстрое; sub esp,64
+malloc(64) - как ни суй, как ни ворочай, более 1 инструкции
+=> локальный мелкий буфер ВСЕГДА быстрее vector!
+
+вектор == "медленно", безопасно, с оверхедами
+(но можно играться в спецмакросы даже в отладочных билдах)
+
+какие виды векторов нам вообще нужны?
+1. тру динамический, std::vector classic
+2. фикс размер, но с проверками, std::array (вроде бы)
+условный fixed_vector
+
++ возможно!
+хорошо себя поведет гибрид
+чтобы поменьше аллокаций
+
+template<typename T> class super_simple_vector {
+public:
+    T * data;
+	int max_capacity;
+	int cur_length;
+	
+	T & operator[](int index) {
+	    // !!! вот она, радость-то! (ну или половина)
+		assert(index >= 0 && index < cur_length);
+		return data[index];
+	}
+};
+
+Спорный (?) тезис #1
+99% времени нужно условных 3 метода
+ctor, dtor, push_back, erase, иии в остальных 95% случаев operator[] - вроде и всё!!!
+
+Понятное дело, нужно и ещё всякое: resize, clear, reserve, возможно, варианты конструкторов, копирование (и оператором и конструктором), move semantics для любителей, итд итд итп. Однако! Утверждаю, что ~99% вызовов будет не про них :)
+
+Ключевой "параметр" вектора #1
+Resize policy!
+??? Со скольки элементов начинаем вектор? - 0, 1, 3, 4, 8, ... интуитивно, 4-32 довольно хорошо
+??? Как подращиваем, когда кончилось? - *sqrt(2), *1.5, *2, ... внезапно! *1.2 для особо больших. Очевидно, любая конкретная константа в каком-то случае ПЛОХА И ВРЕДНА.
+??? Скукоживаемся ли автоматически вниз, или как обычно? - наверное нет!!!
+
+Развлечение для гиков #1
+??? В каком порядке укладывать поля?
+
+Развлечение для гиков #2
+??? Попробовать автоматически "скукоживаться" (то есть reclaim-ить память)
+
+struct hybrid_vector {
+    T * data;
+	int max_capacity;
+	int cur_length;
+    T * big_buffer; // можно выкинуть. if (data != small...)
+	T small_buffer[32]; // дискуссионный вопрос!
+};
+
+===
+
+Домашка!
+
+Пишем шаблонный вектор.
+Который работает (ну или пытается) с любыми типами, не только лишь POD.
+
+===
+
+Про бенчмарки.
+* Не верить компилятору. Норовит соптимизировать константы.
+* volatile наш друг. Но может надуть. disasm наш ВЕРНЫЙ друг.
+* Надо много итераций. Надо МНОГО итераций.
+* QPC() либо gettimeofday() типично достаточно хороши.
+* Надо много прогонов. В идеале выкидывать outliers. НИКОГДА не верить одному прогону (даже с 1м итераций внутри и на 10+ сек длиной.)
+* Не верим любым встроенным счетчикам. Смотрим внешние счетчики OS тоже. (Под винду выдам сниппет; под Linux есть time; под винду powershell measure-command.)
+* Некоторые CPU они как Ежи и Петруччо: любят спать. А просыпаться только завтра. Спасает цикл нагрева воздуха в самом начале программы. Типично 0.1-0.3 сек достаточно.
+* Неплохо приколачивать affinity.
+
+for (int i = 0; i < 1000000; i++) calc1(); // плохо
+
+int res = 0;
+for (int i = 0; i < 1000000; i++) res += calc1(); // получше
+
+volatile int res = 0;
+for (int i = 0; i < 1000000; i++) res += calc1(); // обычно совсем хорошо!
+
+// не подводило ещё ни разу; но я верю, всё впереди.
+volatile int res = 0;
+for (int i = 0; i < 1000000; i++) res += calc1();
+printf("res %d\n", res);
+
+===
+
+Дедлайн про nonstlfreq.cpp: до 3 утра четверга по вашему локальному времени.
+
+Дедлайн про myvector.cpp: до 3 утра пятницы по вашему локальному времени.
+
+Отдельное требование про домашку myvector.cpp: subject == task01, штоп потом в почте легко искалось и сортировалось.
+
+Можно аттачем, можно ссылку на gist.
+
+===
+
+А вот.
+Нужная декларация класса вектора.
+
+Добавлять ещё всякие методы по желанию можно, факультативно.
+Убирать и изменять эти самостоятельно нельзя, даже если я дико ошибся.
+(В этом случае надо срочно мне рассказать про ошибку, я исправлю и разошлю всем.)
+
+Внутри 64-бит счетчики (рекомендую typedef long long llong) можно.
+Наружу хочу int тупо для простоты тестов и прочего.
+Тестировать более 2 миллиардов элементов не будем.
+Хватит и 1 миллиарда!
+
+
+template<typename T> class myvector
+{
+public:
+	myvector();
+	~myvector();
+
+	int capacity();
+	int size();
+
+	void add(const T & value); // because we can
+	T & add(); // easy handmade emplace_back()
+	void erase(int index); // easy handmade erase()
+
+	void push_back(const T & value); // for test compatibility
+	void erase(const T * item); // for test compatibility
+
+	T & operator[](int index);
+	const T & operator[](int index) const;
+
+	T * begin();
+	T * end();
+
+	void clear();
+	void resize(int new_size);
+	void reserve(int min_capacity);
+};
+
+Обязательно надо: разумный drop-in replacement для std::vector (где вот этого набора методов хватит).
+Надо уметь любые размеры вектора до INT_MAX.
+Надо уметь любые типы, как POD, так и сложные.
+
+Ожидаю, но формально необязательно: порвать std::vector хотя бы по каким-то параметрам на синтетике.
+
+Что бенчмаркаем: ВСЁ :)
+Будем мерить все публично доступные методы из списка выше.
+Будем мерить скорость работы в разных случаях (мало/много элементов).
+Будем мерить пожираемую память в разных случаях (мало/много элементов).
+Компилировать будем cl /O2 /EHsc xxxx.cpp.
+
+===
+
+А вот.
+Код про таймер и всякое такое прочее. Портабельный, по идее.
+
+#include <stdio.h>
+
+#ifdef _MSC_VER
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <psapi.h>
+#pragma comment(linker, "/defaultlib:psapi.lib")
+#pragma message("Automatically linking with psapi.lib")
+#endif
+
+typedef long long llong;
+typedef unsigned long long ullong;
+
+llong microtimer()
+{
+#ifdef _MSC_VER
+	// Windows time query
+	static llong iBase = 0;
+	static llong iStart = 0;
+	static llong iFreq = 0;
+
+	LARGE_INTEGER iLarge;
+	if (!iBase)
+	{
+		// get start QPC value
+		QueryPerformanceFrequency(&iLarge); iFreq = iLarge.QuadPart;
+		QueryPerformanceCounter(&iLarge); iStart = iLarge.QuadPart;
+
+		// get start UTC timestamp
+		// assuming it's still approximately the same moment as iStart, give or take a msec or three
+		FILETIME ft;
+		GetSystemTimeAsFileTime(&ft);
+
+		iBase = (llong(ft.dwHighDateTime)<<32) + llong(ft.dwLowDateTime);
+		iBase = (iBase - 116444736000000000ULL) / 10; // rebase from 01 Jan 1601 to 01 Jan 1970, and rescale to 1 usec from 100 ns
+	}
+
+	// we can't easily drag iBase into parens because iBase*iFreq/1000000 overflows 64bit int!
+	QueryPerformanceCounter(&iLarge);
+	return iBase + (iLarge.QuadPart - iStart) * 1000000 / iFreq;
+
+#else
+	// UNIX time query
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return llong(tv.tv_sec) * llong(1000000) + llong(tv.tv_usec);
+#endif
+}
+
+void onexit()
+{
+#ifdef _MSC_VER
+	PROCESS_MEMORY_COUNTERS pmc;
+	HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, GetCurrentProcessId());
+	if (hProcess && GetProcessMemoryInfo(hProcess, &pmc, sizeof(pmc)))
+		printf ( "--- peak-wss=%d, peak-pagefile=%d\n", (int)pmc.PeakWorkingSetSize, (int)pmc.PeakPagefileUsage);
+#endif
+}
+
+int main(int argc, char **argv)
+{
+	onexit();
+	return 0;
+}
+
+--eof--
