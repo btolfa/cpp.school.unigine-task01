@@ -19,6 +19,5 @@ build:
   verbosity: normal
 
 test_script:
-  - cd build
   - ctest -V -C %CONFIGURATION%
   - ps: (new-object net.webclient).UploadFile("https://ci.appveyor.com/api/testresults/junit/$($env:APPVEYOR_JOB_ID)", (Resolve-Path .\test_detail.xml))
