@@ -16,6 +16,6 @@ add_executable(task01
 )
 
 target_include_directories(task01 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-set_directory_properties(VS_STARTUP_PROJECT task01)
+set_directory_properties(PROPERTIES VS_STARTUP_PROJECT task01)
 
 add_test(NAME myvector COMMAND task01 --gtest_output=xml)
